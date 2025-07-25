@@ -1,0 +1,308 @@
+{% load custom_filters %}
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sentiment Analysis Results</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #ecf0f1;
+            margin: 0;
+            padding: 40px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        .container {
+            background-color: #ffffff;
+            padding: 40px;
+            width: 100%;
+            max-width: 1200px;
+            border-radius: 16px;
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .back-button {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background-color: #34495e;
+        color: white;
+        padding: 10px 16px;
+        border-radius: 30px;
+        text-decoration: none;
+        font-weight: 600;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+        transition: background-color 0.3s ease;
+    }
+
+    .back-button:hover {
+        background-color: #2c3e50;
+    }
+
+
+        h2, h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .section-title {
+            margin-top: 30px;
+        }
+
+        .flex-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 30px;
+        }
+
+        .progress-wrapper {
+            flex: 1 1 500px;
+        }
+
+        .chart-container {
+            width: 300px;
+            height: 300px;
+        }
+
+        .progress-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .progress-bar {
+            background-color: #eee;
+            height: 18px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            border-radius: 10px;
+        }
+
+        .filter-controls {
+            margin-top: 30px;
+            display: flex;
+            gap: 1em;
+            flex-wrap: wrap;
+        }
+
+        .filter-controls input,
+        .filter-controls select,
+        .filter-controls button {
+            padding: 8px 12px;
+            font-size: 14px;
+        }
+
+        .scrollable-table {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            margin-top: 20px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 10px;
+            border-bottom: 1px solid #ddd;
+            text-align: left;
+        }
+
+        th {
+            background-color: #f9f9f9;
+        }
+
+        .export-button {
+            background-color: #2c3e50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .export-button:hover {
+            background-color: #1a242f;
+        }
+
+        .comment-table-container {
+            margin-top: 30px;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 10px;
+        }
+
+        #loading-spinner {
+            display: none;
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(255,255,255,0.8);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+
+        table th {
+            position: sticky;
+            top: 0;
+        }
+    </style>
+</head>
+<body>
+<div id="loading-spinner">Analyzing... Please wait.</div>
+
+<div class="container">
+    <h2>Sentiment Analysis Results</h2>
+    <p><strong>Total Comments Analyzed:</strong> {{ total }}</p>
+
+    <div class="flex-row">
+        <!-- Progress Bars -->
+        <div class="progress-wrapper">
+            <h3 class="section-title">Sentiment Breakdown</h3>
+            {% for label, count in counts.items %}
+                <div class="progress-label">{{ label }} ({{ count }})</div>
+                {% with pct=percentages|get_item:label %}
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: {{ pct }}%;
+                            background-color: {% if label == 'Positive' %}#27ae60
+                                             {% elif label == 'Negative' %}#e74c3c
+                                             {% else %}#95a5a6{% endif %};">
+                        </div>
+                    </div>
+                {% endwith %}
+            {% endfor %}
+        </div>
+
+        <!-- Pie Chart -->
+        <div class="chart-container">
+            <canvas id="sentimentPieChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Filters and Table -->
+    <h3 class="section-title">Sample Explanations</h3>
+    <div class="filter-controls">
+        <input type="text" id="searchInput" placeholder="Search comments...">
+        <select id="sentimentFilter">
+            <option value="All">All Sentiments</option>
+            <option value="Positive">Positive</option>
+            <option value="Negative">Negative</option>
+            <option value="Neutral">Neutral</option>
+        </select>
+        <button onclick="exportToCSV()" class="export-button">Export CSV</button>
+    </div>
+    <a href="{% url 'dashboard' %}" class="back-button">📂 View Analysis Dashboard</a>
+
+    <div class="comment-table-container">
+        <h3>Comments Analysis Table</h3>
+        <div class="scrollable-table">
+            <table id="commentsTable">
+                <thead>
+                    <tr>
+                        <th>Comment</th>
+                        <th>Sentiment</th>
+                        <th>Explanation</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in sample_explanations %}
+                        <tr>
+                            <td>{{ row.0 }}</td>
+                            <td>{{ row.1 }}</td>
+                            <td>{{ row.2 }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <a href="{% url 'analyze_comments' %}" class="back-button">⬅ Back to Upload</a>
+
+    </div>
+</div>
+
+<!-- Pie Chart Script -->
+<script>
+    const pieChart = new Chart(document.getElementById('sentimentPieChart'), {
+        type: 'pie',
+        data: {
+            labels: [{% for label in counts.keys %}'{{ label }}'{% if not forloop.last %}, {% endif %}{% endfor %}],
+            datasets: [{
+                data: [{% for count in counts.values %}{{ count }}{% if not forloop.last %}, {% endif %}{% endfor %}],
+                backgroundColor: [
+                    '#27ae60', // Positive
+                    '#e74c3c', // Negative
+                    '#95a5a6'  // Neutral
+                ]
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { position: 'bottom' }
+            }
+        }
+    });
+</script>
+
+<!-- Filter & Export Logic -->
+<script>
+    const searchInput = document.getElementById("searchInput");
+    const sentimentFilter = document.getElementById("sentimentFilter");
+    const rows = document.querySelectorAll("#commentsTable tbody tr");
+
+    searchInput.addEventListener("input", filterTable);
+    sentimentFilter.addEventListener("change", filterTable);
+
+    function filterTable() {
+        const search = searchInput.value.toLowerCase();
+        const filter = sentimentFilter.value;
+
+        rows.forEach(row => {
+            const comment = row.cells[0].textContent.toLowerCase();
+            const sentiment = row.cells[1].textContent;
+            const matchSearch = comment.includes(search);
+            const matchFilter = filter === "All" || sentiment === filter;
+            row.style.display = (matchSearch && matchFilter) ? "" : "none";
+        });
+    }
+
+    function exportToCSV() {
+        let csv = 'Comment,Sentiment,Explanation\n';
+        rows.forEach(row => {
+            if (row.style.display === 'none') return;
+            const cols = row.querySelectorAll('td');
+            const rowData = Array.from(cols).map(td => `"${td.innerText.replace(/"/g, '""')}"`);
+            csv += rowData.join(',') + '\n';
+        });
+
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = 'sentiment_results.csv';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+
+    // Show loading spinner
+    document.querySelectorAll('form').forEach(form => {
+        form.addEventListener('submit', () => {
+            document.getElementById('loading-spinner').style.display = 'flex';
+        });
+    });
+</script>
+</body>
+</html>
